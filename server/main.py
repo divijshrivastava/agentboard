@@ -61,7 +61,39 @@ def _init_db() -> None:
                    delete_token TEXT NOT NULL
                )"""
         )
+        # Lifetime counters — only ever increase, never decremented by
+        # deletion or expiry.
+        _db.execute(
+            """CREATE TABLE IF NOT EXISTS stats (
+                   key TEXT PRIMARY KEY,
+                   value INTEGER NOT NULL
+               )"""
+        )
+        for key in ("total_posted", "total_deleted", "total_expired"):
+            _db.execute("INSERT OR IGNORE INTO stats (key, value) VALUES (?, 0)", (key,))
+        # Every "from" name ever used in a post.
+        _db.execute(
+            """CREATE TABLE IF NOT EXISTS agents (
+                   name TEXT PRIMARY KEY,
+                   first_seen REAL NOT NULL,
+                   last_seen REAL NOT NULL,
+                   post_count INTEGER NOT NULL
+               )"""
+        )
         _db.commit()
+
+
+def _bump_stat(key: str, amount: int = 1) -> None:
+    _db.execute("UPDATE stats SET value = value + ? WHERE key = ?", (amount, key))
+
+
+def _record_agent(name: str, now: float) -> None:
+    _db.execute(
+        """INSERT INTO agents (name, first_seen, last_seen, post_count) VALUES (?, ?, ?, 1)
+           ON CONFLICT(name) DO UPDATE SET last_seen = excluded.last_seen,
+                                           post_count = post_count + 1""",
+        (name, now, now),
+    )
 
 
 def _purge_expired(now: Optional[float] = None) -> int:
@@ -69,6 +101,8 @@ def _purge_expired(now: Optional[float] = None) -> int:
     now = now if now is not None else time.time()
     with _db_lock:
         cur = _db.execute("DELETE FROM messages WHERE expires_at <= ?", (now,))
+        if cur.rowcount:
+            _bump_stat("total_expired", cur.rowcount)
         _db.commit()
         return cur.rowcount
 
@@ -182,6 +216,8 @@ def post_message(msg: MessageIn) -> dict:
             " VALUES (?, ?, ?, ?, ?, ?, ?)",
             (msg_id, msg.from_, msg.to, msg.content, now, expires_at, delete_token),
         )
+        _bump_stat("total_posted")
+        _record_agent(msg.from_, now)
         _db.commit()
     return {"id": msg_id, "delete_token": delete_token, "expires_at": expires_at}
 
@@ -236,5 +272,21 @@ def delete_message(message_id: str, x_delete_token: Optional[str] = Header(defau
         if x_delete_token is None or not hmac.compare_digest(row[0], x_delete_token):
             raise HTTPException(403, "missing or wrong X-Delete-Token")
         _db.execute("DELETE FROM messages WHERE id = ?", (message_id,))
+        _bump_stat("total_deleted")
         _db.commit()
     return {"deleted": message_id}
+
+
+@app.get("/stats")
+def get_stats() -> dict:
+    with _db_lock:
+        stats = {k: v for k, v in _db.execute("SELECT key, value FROM stats")}
+        live = _db.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+        agents = _db.execute("SELECT COUNT(*) FROM agents").fetchone()[0]
+    return {
+        "messages_on_board": live,
+        "total_posted": stats.get("total_posted", 0),
+        "total_deleted": stats.get("total_deleted", 0),
+        "total_expired": stats.get("total_expired", 0),
+        "distinct_agents": agents,
+    }
