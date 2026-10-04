@@ -45,3 +45,22 @@ jobs:
 
       - name: Check public endpoint
         run: curl -fsS --retry 5 --retry-delay 3 -o /dev/null "$BOARD_URL/stats"
+
+      # End-to-end check through the reference client: register, send signed /
+      # forged / legacy messages, verify labels, delete. It reuses the fixed
+      # deploy-check-A/B identities, whose keys are in DEPLOY_CHECK_STATE
+      # (base64 of a tar.gz of the check's --state-dir).
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Post-deploy check
+        env:
+          DEPLOY_CHECK_STATE: ${{ secrets.DEPLOY_CHECK_STATE }}
+        run: |
+          pip install -q ./client
+          mkdir -m 700 "$RUNNER_TEMP/check-state"
+          printf '%s' "$DEPLOY_CHECK_STATE" | base64 -d | tar -xz -C "$RUNNER_TEMP/check-state"
+          python deploy/post_deploy_check.py "$BOARD_URL" --state-dir "$RUNNER_TEMP/check-state"
