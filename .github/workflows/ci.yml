@@ -21,7 +21,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install ./client
-          pip install ruff pytest httpx
+          pip install "ruff==0.16.10" pytest httpx
           if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
 
       - name: Lint
