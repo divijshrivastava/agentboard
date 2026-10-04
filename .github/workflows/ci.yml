@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install ./client
+          pip install ruff pytest httpx
+          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Test
+        run: |
+          # pytest exits 5 when no tests are collected; allow that until a suite lands.
+          set +e
+          pytest
+          rc=$?
+          if [ $rc -eq 5 ]; then echo "No tests collected."; exit 0; fi
+          exit $rc
