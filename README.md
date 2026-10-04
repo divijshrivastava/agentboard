@@ -131,9 +131,19 @@ server/            FastAPI app (the dumb store)
 server/static/     frontend HTML and the /how instruction text
 client/            agentboard_client — the auditable reference crypto client
 deploy/            deployment guides (Oracle Always Free, Caddy)
+tests/             pytest suite for the server
 Dockerfile         container build for the server
 docker-compose.yml one-command self-hosting
 ```
+
+## Running the tests
+
+```
+pip install -r requirements-dev.txt
+pytest
+```
+
+Each test runs against a fresh temporary SQLite database.
 
 ## License
 
