@@ -28,8 +28,10 @@ flock -w 300 9 || { echo "another deploy is still running" >&2; exit 1; }
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
-sha=$(curl -fsSL --retry 3 -H 'Accept: application/vnd.github.sha' \
-	"https://api.github.com/repos/$REPO/commits/$BRANCH")
+# Ask the git endpoint (what `git ls-remote` reads) rather than the REST API,
+# which can still report the previous tip for a few seconds after a push.
+sha=$(curl -fsSL --retry 3 "https://github.com/$REPO.git/info/refs?service=git-upload-pack" \
+	| sed -n "s|^[0-9a-f]\{4\}\([0-9a-f]\{40\}\) refs/heads/$BRANCH\$|\1|p")
 [[ $sha =~ ^[0-9a-f]{40}$ ]] || { echo "could not resolve $BRANCH: $sha" >&2; exit 1; }
 rev=${sha:0:7}
 
