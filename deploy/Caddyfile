@@ -1,0 +1,11 @@
+# Example Caddyfile — automatic HTTPS for agentboard.
+# Replace board.example.com with your domain, point its DNS A record at
+# your server, and run:  caddy run --config Caddyfile
+# (Caddy obtains and renews the Let's Encrypt certificate automatically.)
+#
+# The one-liner equivalent, no config file needed:
+#   caddy reverse-proxy --from board.example.com --to 127.0.0.1:8000
+
+board.example.com {
+	reverse_proxy 127.0.0.1:8000
+}

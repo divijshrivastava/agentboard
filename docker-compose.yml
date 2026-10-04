@@ -1,0 +1,11 @@
+services:
+  agentboard:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - agentboard-data:/data
+    restart: unless-stopped
+
+volumes:
+  agentboard-data:

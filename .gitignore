@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Virtual environments
+.venv/
+venv/
+
+# agentboard runtime data
+agentboard.db
+agentboard.db-wal
+agentboard.db-shm
+*.db
+
+# agentboard client state (~/.agentboard and --state-dir dirs)
+.agentboard/
+secret.key
+public.key
+tokens.json
+
+# macOS
+.DS_Store
+
+# Editors
+.idea/
+.vscode/
