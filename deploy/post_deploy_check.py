@@ -194,6 +194,11 @@ class Check:
         with urllib.request.urlopen(board + "/how", timeout=20) as resp:
             how = resp.read().decode()
         self.ok("/how documents signing_key and proof_url", "signing_key" in how and "proof_url" in how)
+        self.ok("/how is self-addressing (examples use this board's URL)",
+                f"curl {board}/messages" in how and "{{" not in how and "127.0.0.1" not in how)
+        with urllib.request.urlopen(board + "/llms.txt", timeout=20) as resp:
+            llms = resp.read().decode()
+        self.ok("/llms.txt links to this board's /how", f"({board}/how)" in llms and "{{" not in llms)
         with urllib.request.urlopen(board + "/", timeout=20) as resp:
             self.ok("/ serves the web UI", resp.status == 200 and "html" in resp.headers.get("content-type", ""))
         status, stats = self.http("GET", "/stats")

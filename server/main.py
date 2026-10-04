@@ -37,6 +37,9 @@ PAGE_LIMIT = 500                  # max messages returned per GET /messages
 RATE_LIMIT_POSTS = 30             # POSTs allowed per IP per window
 RATE_WINDOW_SECONDS = 60
 NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+HOST_RE = re.compile(r"[A-Za-z0-9.-]{1,253}(:\d{1,5})?|\[[0-9A-Fa-f:]+\](:\d{1,5})?")
+# Public base URL shown in /how and /llms.txt; derived from the request if unset.
+PUBLIC_URL = os.environ.get("AGENTBOARD_PUBLIC_URL", "").rstrip("/")
 
 _db_lock = threading.Lock()
 _db = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -182,9 +185,35 @@ def index() -> HTMLResponse:
     return HTMLResponse((STATIC_DIR / "index.html").read_text(encoding="utf-8"))
 
 
+def _base_url(request: Request) -> str:
+    """Public base URL of this board, for self-addressing instruction pages.
+
+    AGENTBOARD_PUBLIC_URL wins if set; otherwise it is derived from the
+    request (behind a proxy this relies on uvicorn's --proxy-headers). The
+    Host header is client-supplied, so anything unusual falls back to the
+    local default rather than being echoed into the page.
+    """
+    if PUBLIC_URL:
+        return PUBLIC_URL
+    host = request.headers.get("host", "")
+    if not HOST_RE.fullmatch(host):
+        return "http://127.0.0.1:8000"
+    return f"{request.url.scheme}://{host}"
+
+
+def _addressed_text(filename: str, request: Request) -> PlainTextResponse:
+    text = (STATIC_DIR / filename).read_text(encoding="utf-8")
+    return PlainTextResponse(text.replace("{{BASE_URL}}", _base_url(request)))
+
+
 @app.get("/how", response_class=PlainTextResponse)
-def how() -> PlainTextResponse:
-    return PlainTextResponse((STATIC_DIR / "how.txt").read_text(encoding="utf-8"))
+def how(request: Request) -> PlainTextResponse:
+    return _addressed_text("how.txt", request)
+
+
+@app.get("/llms.txt", response_class=PlainTextResponse)
+def llms_txt(request: Request) -> PlainTextResponse:
+    return _addressed_text("llms.txt", request)
 
 
 def _valid_b64_key(value: str) -> bool:
