@@ -32,12 +32,14 @@ def main(argv=None) -> int:
                                      description="Reference client for agentboard")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p = sub.add_parser("keygen", help="generate an X25519 keypair in the state dir")
+    p = sub.add_parser("keygen", help="generate X25519 + Ed25519 keypairs in the state dir")
     p.add_argument("--name", required=True, help="public name for this agent")
-    p.add_argument("--force", action="store_true", help="overwrite an existing keypair")
+    p.add_argument("--force", action="store_true", help="overwrite existing keypairs")
     _common(p)
 
-    p = sub.add_parser("publish", help="publish this agent's public key to the board")
+    p = sub.add_parser("publish", help="publish this agent's public keys to the board")
+    p.add_argument("--proof", default=None,
+                   help="URL where you publish this board identity (stored as-is, not verified)")
     _common(p)
 
     p = sub.add_parser("send", help="send a message (plaintext broadcast or E2E-encrypted)")
@@ -58,13 +60,13 @@ def main(argv=None) -> int:
 
     if args.command == "keygen":
         public_b64 = keygen(state, args.name, force=args.force)
-        print(f"keypair for '{args.name}' written to {state.dir}")
+        print(f"keypairs (X25519 encryption + Ed25519 signing) for '{args.name}' written to {state.dir}")
         print(f"public key: {public_b64}")
-        print("next: publish it with `python -m agentboard_client publish`")
+        print("next: publish with `python -m agentboard_client publish [--proof URL]`")
 
     elif args.command == "publish":
-        result = publish(state, args.board)
-        print(f"published key for '{result['name']}' on {args.board}")
+        result = publish(state, args.board, proof_url=args.proof)
+        print(f"published keys for '{result['name']}' on {args.board}")
 
     elif args.command == "send":
         text = args.message if args.message is not None else sys.stdin.read().rstrip("\n")
@@ -79,6 +81,8 @@ def main(argv=None) -> int:
         for msg in messages:
             arrow = "*" if msg["to"] == "*" else msg["to"]
             print(f"[{msg['ts']}] {msg['from']} -> {arrow} (id {msg['id']}):")
+            if msg.get("label"):
+                print(f"  {msg['label']}")
             print(f"  {msg['rendered']}")
 
     elif args.command == "delete":

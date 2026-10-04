@@ -8,6 +8,8 @@ interpreted, validated, or distinguished by the server beyond a size cap.
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import hmac
 import os
 import re
@@ -47,9 +49,18 @@ def _init_db() -> None:
             """CREATE TABLE IF NOT EXISTS keys (
                    name TEXT PRIMARY KEY,
                    public_key TEXT NOT NULL,
+                   signing_key TEXT,
+                   proof_url TEXT,
                    created_at REAL NOT NULL
                )"""
         )
+        # Idempotent migration for databases created before signing_key /
+        # proof_url existed.
+        key_cols = {r[1] for r in _db.execute("PRAGMA table_info(keys)")}
+        if "signing_key" not in key_cols:
+            _db.execute("ALTER TABLE keys ADD COLUMN signing_key TEXT")
+        if "proof_url" not in key_cols:
+            _db.execute("ALTER TABLE keys ADD COLUMN proof_url TEXT")
         _db.execute(
             """CREATE TABLE IF NOT EXISTS messages (
                    id TEXT PRIMARY KEY,
@@ -149,6 +160,8 @@ def rate_limit(request: Request) -> None:
 class KeyRegistration(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     public_key: str = Field(min_length=1, max_length=256)
+    signing_key: Optional[str] = Field(default=None, max_length=256)
+    proof_url: Optional[str] = Field(default=None, max_length=500)
 
 
 class MessageIn(BaseModel):
@@ -174,32 +187,61 @@ def how() -> PlainTextResponse:
     return PlainTextResponse((STATIC_DIR / "how.txt").read_text(encoding="utf-8"))
 
 
+def _valid_b64_key(value: str) -> bool:
+    """Both X25519 and Ed25519 public keys are 32 raw bytes, base64-encoded."""
+    try:
+        return len(base64.b64decode(value, validate=True)) == 32
+    except (binascii.Error, ValueError):
+        return False
+
+
 @app.post("/keys", status_code=201, dependencies=[Depends(rate_limit)])
 def register_key(reg: KeyRegistration) -> dict:
     if not NAME_RE.match(reg.name):
         raise HTTPException(422, "name must match [A-Za-z0-9_-]{1,64}")
+    if not _valid_b64_key(reg.public_key):
+        raise HTTPException(422, "public_key must be a base64-encoded 32-byte X25519 key")
+    if reg.signing_key is not None and not _valid_b64_key(reg.signing_key):
+        raise HTTPException(422, "signing_key must be a base64-encoded 32-byte Ed25519 key")
+    if reg.proof_url is not None and not reg.proof_url.startswith(("http://", "https://")):
+        raise HTTPException(422, "proof_url must start with http:// or https://")
     now = time.time()
     with _db_lock:
         existing = _db.execute("SELECT name FROM keys WHERE name = ?", (reg.name,)).fetchone()
         if existing:
             raise HTTPException(409, f"name '{reg.name}' is already registered")
         _db.execute(
-            "INSERT INTO keys (name, public_key, created_at) VALUES (?, ?, ?)",
-            (reg.name, reg.public_key, now),
+            "INSERT INTO keys (name, public_key, signing_key, proof_url, created_at)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (reg.name, reg.public_key, reg.signing_key, reg.proof_url, now),
         )
         _db.commit()
-    return {"name": reg.name, "public_key": reg.public_key, "created_at": now}
+    return {
+        "name": reg.name,
+        "public_key": reg.public_key,
+        "signing_key": reg.signing_key,
+        "proof_url": reg.proof_url,
+        "registered_at": now,
+    }
 
 
 @app.get("/keys/{name}")
 def get_key(name: str) -> dict:
     with _db_lock:
         row = _db.execute(
-            "SELECT name, public_key, created_at FROM keys WHERE name = ?", (name,)
+            "SELECT name, public_key, signing_key, proof_url, created_at"
+            " FROM keys WHERE name = ?",
+            (name,),
         ).fetchone()
     if not row:
         raise HTTPException(404, f"no key registered for '{name}'")
-    return {"name": row[0], "public_key": row[1], "created_at": row[2]}
+    return {
+        "name": row[0],
+        "public_key": row[1],
+        "signing_key": row[2],
+        "proof_url": row[3],
+        "registered_at": row[4],
+    }
 
 
 @app.post("/messages", status_code=201, dependencies=[Depends(rate_limit)])
