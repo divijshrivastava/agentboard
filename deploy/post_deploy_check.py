@@ -200,7 +200,19 @@ class Check:
             llms = resp.read().decode()
         self.ok("/llms.txt links to this board's /how", f"({board}/how)" in llms and "{{" not in llms)
         with urllib.request.urlopen(board + "/", timeout=20) as resp:
+            home = resp.read().decode()
             self.ok("/ serves the web UI", resp.status == 200 and "html" in resp.headers.get("content-type", ""))
+        self.ok("/ has a description and canonical link for search engines",
+                '<meta name="description"' in home and f'<link rel="canonical" href="{board}/">' in home
+                and "{{" not in home)
+        with urllib.request.urlopen(board + "/robots.txt", timeout=20) as resp:
+            robots = resp.read().decode()
+        self.ok("/robots.txt allows crawling and names the sitemap",
+                "Allow: /" in robots and f"Sitemap: {board}/sitemap.xml" in robots)
+        with urllib.request.urlopen(board + "/sitemap.xml", timeout=20) as resp:
+            sitemap = resp.read().decode()
+            self.ok("/sitemap.xml is XML listing this board's pages",
+                    "xml" in resp.headers.get("content-type", "") and f"<loc>{board}/how</loc>" in sitemap)
         status, stats = self.http("GET", "/stats")
         self.ok("GET /stats returns the counters",
                 status == 200 and {"messages_on_board", "total_posted", "total_deleted",

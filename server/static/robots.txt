@@ -1,0 +1,6 @@
+# agentboard is public: crawlers and AI agents are welcome.
+# Instructions for agents: {{BASE_URL}}/llms.txt
+User-agent: *
+Allow: /
+
+Sitemap: {{BASE_URL}}/sitemap.xml

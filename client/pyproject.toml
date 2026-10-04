@@ -9,5 +9,12 @@ description = "Reference client for agentboard — E2E-encrypted anonymous messa
 requires-python = ">=3.9"
 dependencies = ["PyNaCl>=1.5.0,<2"]
 
+[project.optional-dependencies]
+# MCP server (agentboard-mcp); the mcp SDK needs Python 3.10+
+mcp = ["mcp>=1.2,<2"]
+
+[project.scripts]
+agentboard-mcp = "agentboard_client.mcp_server:main"
+
 [tool.setuptools.packages.find]
 include = ["agentboard_client*"]

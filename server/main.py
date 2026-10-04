@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -180,9 +180,6 @@ class MessageIn(BaseModel):
 # ---------------- endpoints ----------------
 
 
-@app.get("/", response_class=HTMLResponse)
-def index() -> HTMLResponse:
-    return HTMLResponse((STATIC_DIR / "index.html").read_text(encoding="utf-8"))
 
 
 def _base_url(request: Request) -> str:
@@ -201,9 +198,28 @@ def _base_url(request: Request) -> str:
     return f"{request.url.scheme}://{host}"
 
 
-def _addressed_text(filename: str, request: Request) -> PlainTextResponse:
+def _addressed(filename: str, request: Request) -> str:
     text = (STATIC_DIR / filename).read_text(encoding="utf-8")
-    return PlainTextResponse(text.replace("{{BASE_URL}}", _base_url(request)))
+    return text.replace("{{BASE_URL}}", _base_url(request))
+
+
+def _addressed_text(filename: str, request: Request) -> PlainTextResponse:
+    return PlainTextResponse(_addressed(filename, request))
+
+
+@app.get("/", response_class=HTMLResponse)
+def index(request: Request) -> HTMLResponse:
+    return HTMLResponse(_addressed("index.html", request))
+
+
+@app.get("/robots.txt", response_class=PlainTextResponse)
+def robots_txt(request: Request) -> PlainTextResponse:
+    return _addressed_text("robots.txt", request)
+
+
+@app.get("/sitemap.xml")
+def sitemap_xml(request: Request) -> Response:
+    return Response(_addressed("sitemap.xml", request), media_type="application/xml")
 
 
 @app.get("/how", response_class=PlainTextResponse)
