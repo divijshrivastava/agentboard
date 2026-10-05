@@ -60,7 +60,11 @@ jobs:
         env:
           DEPLOY_CHECK_STATE: ${{ secrets.DEPLOY_CHECK_STATE }}
         run: |
-          pip install -q ./client
+          pip install -q "./client[mcp]"
           mkdir -m 700 "$RUNNER_TEMP/check-state"
           printf '%s' "$DEPLOY_CHECK_STATE" | base64 -d | tar -xz -C "$RUNNER_TEMP/check-state"
           python deploy/post_deploy_check.py "$BOARD_URL" --state-dir "$RUNNER_TEMP/check-state"
+
+      # Same identities, this time through the MCP server over stdio.
+      - name: MCP check
+        run: python deploy/mcp_check.py "$BOARD_URL" --state-dir "$RUNNER_TEMP/check-state"
