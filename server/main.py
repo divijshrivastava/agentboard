@@ -72,9 +72,15 @@ def _init_db() -> None:
                    content TEXT NOT NULL,
                    created_at REAL NOT NULL,
                    expires_at REAL NOT NULL,
-                   delete_token TEXT NOT NULL
+                   delete_token TEXT NOT NULL,
+                   deleted_at REAL
                )"""
         )
+        # Idempotent migration for databases created before deletion left a
+        # tombstone row instead of removing the message outright.
+        msg_cols = {r[1] for r in _db.execute("PRAGMA table_info(messages)")}
+        if "deleted_at" not in msg_cols:
+            _db.execute("ALTER TABLE messages ADD COLUMN deleted_at REAL")
         # Lifetime counters — only ever increase, never decremented by
         # deletion or expiry.
         _db.execute(
@@ -111,12 +117,21 @@ def _record_agent(name: str, now: float) -> None:
 
 
 def _purge_expired(now: Optional[float] = None) -> int:
-    """Delete expired messages. Called lazily on reads and by the sweeper."""
+    """Delete expired rows. Called lazily on reads and by the sweeper.
+
+    Only rows that still held content count as expired; tombstones (already
+    deleted by their authors) are swept at the same time but keep their
+    earlier total_deleted accounting.
+    """
     now = now if now is not None else time.time()
     with _db_lock:
+        expired = _db.execute(
+            "SELECT COUNT(*) FROM messages WHERE expires_at <= ? AND deleted_at IS NULL",
+            (now,),
+        ).fetchone()[0]
         cur = _db.execute("DELETE FROM messages WHERE expires_at <= ?", (now,))
-        if cur.rowcount:
-            _bump_stat("total_expired", cur.rowcount)
+        if expired:
+            _bump_stat("total_expired", expired)
         _db.commit()
         return cur.rowcount
 
@@ -318,6 +333,9 @@ def list_messages(
     _purge_expired(now)
     clauses, params = [], []
     if to is not None:
+        # Tombstones carry no addressee, so they cannot match a recipient
+        # filter; only the unfiltered listing shows them.
+        clauses.append("deleted_at IS NULL")
         if to == "*":
             clauses.append("\"to\" = '*'")
         else:
@@ -326,39 +344,58 @@ def list_messages(
     if since is not None:
         clauses.append("created_at > ?")
         params.append(since)
-    sql = "SELECT id, frm, \"to\", content, created_at, expires_at FROM messages"
+    sql = "SELECT id, frm, \"to\", content, created_at, expires_at, deleted_at FROM messages"
     if clauses:
         sql += " WHERE " + " AND ".join(clauses)
     sql += " ORDER BY created_at DESC LIMIT ?"
     params.append(PAGE_LIMIT)
     with _db_lock:
         rows = _db.execute(sql, params).fetchall()
-    return {
-        "messages": [
-            {
+    messages = []
+    for r in rows:
+        if r[6] is not None:
+            # Tombstone: a deleted message's placeholder. Sender, addressee
+            # and content are wiped; only the timestamps remain.
+            messages.append({
+                "id": r[0],
+                "from": None,
+                "to": None,
+                "content": None,
+                "created_at": r[4],
+                "expires_at": r[5],
+                "deleted": True,
+                "deleted_at": r[6],
+            })
+        else:
+            messages.append({
                 "id": r[0],
                 "from": r[1],
                 "to": r[2],
                 "content": r[3],
                 "created_at": r[4],
                 "expires_at": r[5],
-            }
-            for r in rows
-        ]
-    }
+                "deleted": False,
+            })
+    return {"messages": messages}
 
 
 @app.delete("/messages/{message_id}")
 def delete_message(message_id: str, x_delete_token: Optional[str] = Header(default=None)) -> dict:
     with _db_lock:
         row = _db.execute(
-            "SELECT delete_token FROM messages WHERE id = ?", (message_id,)
+            "SELECT delete_token, deleted_at FROM messages WHERE id = ?", (message_id,)
         ).fetchone()
-        if not row:
+        if not row or row[1] is not None:
             raise HTTPException(404, f"no message with id '{message_id}'")
         if x_delete_token is None or not hmac.compare_digest(row[0], x_delete_token):
             raise HTTPException(403, "missing or wrong X-Delete-Token")
-        _db.execute("DELETE FROM messages WHERE id = ?", (message_id,))
+        # Tombstone: wipe sender, addressee, content and the token, but keep
+        # the row so readers can see that a message was here, and when.
+        _db.execute(
+            "UPDATE messages SET frm = '', \"to\" = '', content = '', delete_token = '',"
+            " deleted_at = ? WHERE id = ?",
+            (time.time(), message_id),
+        )
         _bump_stat("total_deleted")
         _db.commit()
     return {"deleted": message_id}
@@ -368,7 +405,7 @@ def delete_message(message_id: str, x_delete_token: Optional[str] = Header(defau
 def get_stats() -> dict:
     with _db_lock:
         stats = {k: v for k, v in _db.execute("SELECT key, value FROM stats")}
-        live = _db.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+        live = _db.execute("SELECT COUNT(*) FROM messages WHERE deleted_at IS NULL").fetchone()[0]
         agents = _db.execute("SELECT COUNT(*) FROM agents").fetchone()[0]
     return {
         "messages_on_board": live,

@@ -156,6 +156,12 @@ def read_messages(include_unreadable: bool = False, limit: int = 50) -> dict:
     me = _local_name(state)
     messages = []
     for m in _call(core.read, state, _board()):
+        if m.get("deleted"):
+            # Tombstones carry no sender or text; show them as activity.
+            messages.append({"id": m["id"], "from": None, "to": None,
+                             "sent_at": m["ts"], "kind": "deleted",
+                             "text": m["rendered"]})
+            continue
         unreadable = m["rendered"].startswith(UNREADABLE_PREFIX)
         if unreadable and not include_unreadable:
             continue

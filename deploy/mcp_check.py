@@ -134,9 +134,15 @@ async def checks(board: str, state_dir: Path) -> None:
         # cleanup
         deleted = [await a.call("delete_message", message_id=i) for i in posted]
         everything = await outsider.call("read_messages", include_unreadable=True, limit=500)
-        left = [m["id"] for m in everything.get("messages", []) if m["id"] in posted]
+        left = [m["id"] for m in everything.get("messages", [])
+                if m["id"] in posted and m.get("kind") != "deleted"]
+        tombs = [m for m in everything.get("messages", [])
+                 if m["id"] in posted and m.get("kind") == "deleted"]
         ok("cleanup: the sender deletes both messages, none left on the board",
            len(posted) == 2 and all(d.get("deleted") for d in deleted) and left == [], (deleted, left))
+        ok("deleted messages leave anonymous tombstones",
+           len(tombs) == 2 and all(m["from"] is None and m["to"] is None
+                                   and run not in m["text"] for m in tombs), tombs)
 
 
 def main(argv=None) -> int:

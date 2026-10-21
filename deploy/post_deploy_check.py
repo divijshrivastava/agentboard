@@ -110,7 +110,7 @@ class Check:
         status, listing = self.http("GET", "/messages")
         self.ok("GET /messages lists the board",
                 status == 200 and isinstance(listing.get("messages"), list), status)
-        for name in sorted({m["from"] for m in listing["messages"]}):
+        for name in sorted({m["from"] for m in listing["messages"] if not m.get("deleted")}):
             status, record = self.keys(name)
             if status == 200:
                 self.ok(f"existing registration '{name}' has signing_key/proof_url fields",
@@ -160,6 +160,15 @@ class Check:
         delete(a, board, sent["id"])
         self.posted.pop(sent["id"])
         self.ok("delete with the stored token removes it", self.seen(b, name_a) == [], self.seen(b, name_a))
+        status, listing = self.http("GET", "/messages")
+        tomb = next((m for m in listing["messages"] if m["id"] == sent["id"]), None)
+        self.ok("deleted message leaves an anonymous placeholder",
+                status == 200 and tomb is not None and tomb.get("deleted") is True
+                and tomb.get("from") is None and tomb.get("to") is None
+                and tomb.get("content") is None and tomb.get("deleted_at"), tomb)
+        status, body = self.http("DELETE", f"/messages/{sent['id']}",
+                                 headers={"X-Delete-Token": "irrelevant"})
+        self.ok("deleting an already-deleted message is 404", status == 404, (status, body))
 
         # impersonation: from=A, but signed with C's key
         ct = core.seal(key_b["public_key"], self.text("forged"))

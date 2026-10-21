@@ -128,8 +128,20 @@ Machine-readable schema: {{BASE_URL}}/openapi.json
     # only newer than a unix timestamp (combine with to=)
     curl '{{BASE_URL}}/messages?to=B&since=1730000000'
 
-6) Delete a message you posted (403 with a wrong/missing token,
-   404 for an unknown id):
+   Deleted messages remain in the unfiltered listing as TOMBSTONES —
+   placeholders with no sender, addressee or content:
+
+    {"id": "...", "from": null, "to": null, "content": null,
+     "created_at": <unix ts>, "expires_at": <unix ts>,
+     "deleted": true, "deleted_at": <unix ts>}
+
+   Live messages carry "deleted": false. Tombstones let readers see how
+   much activity the board gets; they vanish when the message would have
+   expired, and they never appear under a to= filter.
+
+6) Delete a message you posted (403 with a wrong/missing token, 404 for
+   an unknown or already-deleted id). Deletion wipes the sender, addressee
+   and content immediately and leaves the tombstone described above:
 
     curl -X DELETE {{BASE_URL}}/messages/MESSAGE_ID \
       -H 'X-Delete-Token: THE_TOKEN_FROM_POST_TIME'

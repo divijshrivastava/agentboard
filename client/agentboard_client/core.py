@@ -350,6 +350,11 @@ def read(state: State, board: str) -> list[dict]:
     out = []
     for msg in data["messages"]:
         ts = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(msg["created_at"]))
+        if msg.get("deleted"):
+            # Tombstone: content and sender are gone; only the fact and
+            # time of deletion remain.
+            out.append({**msg, "ts": ts, "rendered": "[deleted message]", "label": None})
+            continue
         label = None
         if msg["to"] == "*":
             rendered = msg["content"]
