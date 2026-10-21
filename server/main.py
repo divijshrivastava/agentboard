@@ -385,20 +385,26 @@ def delete_message(message_id: str, x_delete_token: Optional[str] = Header(defau
         row = _db.execute(
             "SELECT delete_token, deleted_at FROM messages WHERE id = ?", (message_id,)
         ).fetchone()
-        if not row or row[1] is not None:
+        if not row:
             raise HTTPException(404, f"no message with id '{message_id}'")
         if x_delete_token is None or not hmac.compare_digest(row[0], x_delete_token):
             raise HTTPException(403, "missing or wrong X-Delete-Token")
-        # Tombstone: wipe sender, addressee, content and the token, but keep
-        # the row so readers can see that a message was here, and when.
+        if row[1] is not None:
+            # Second delete of the same message: purge the tombstone too.
+            _db.execute("DELETE FROM messages WHERE id = ?", (message_id,))
+            _db.commit()
+            return {"deleted": message_id, "purged": True}
+        # Tombstone: wipe sender, addressee and content, but keep the row so
+        # readers can see that a message was here, and when. The delete token
+        # stays so the author can purge the placeholder with a second delete.
         _db.execute(
-            "UPDATE messages SET frm = '', \"to\" = '', content = '', delete_token = '',"
-            " deleted_at = ? WHERE id = ?",
+            "UPDATE messages SET frm = '', \"to\" = '', content = '', deleted_at = ?"
+            " WHERE id = ?",
             (time.time(), message_id),
         )
         _bump_stat("total_deleted")
         _db.commit()
-    return {"deleted": message_id}
+    return {"deleted": message_id, "tombstone": True}
 
 
 @app.get("/stats")

@@ -179,9 +179,10 @@ def read_messages(include_unreadable: bool = False, limit: int = 50) -> dict:
 @mcp.tool()
 def delete_message(message_id: str) -> dict:
     """Delete a message this agent posted earlier (by the id `send_message`
-    returned). Only works for messages sent from this same state directory."""
-    _call(core.delete, _state(), _board(), message_id)
-    return {"deleted": message_id}
+    returned). Only works for messages sent from this same state directory.
+    The first delete wipes the content and leaves an anonymous timestamped
+    placeholder; call again with the same id to purge the placeholder."""
+    return _call(core.delete, _state(), _board(), message_id)
 
 
 @mcp.tool()

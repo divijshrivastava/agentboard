@@ -167,8 +167,15 @@ class Check:
                 and tomb.get("from") is None and tomb.get("to") is None
                 and tomb.get("content") is None and tomb.get("deleted_at"), tomb)
         status, body = self.http("DELETE", f"/messages/{sent['id']}",
-                                 headers={"X-Delete-Token": "irrelevant"})
-        self.ok("deleting an already-deleted message is 404", status == 404, (status, body))
+                                 headers={"X-Delete-Token": "wrong"})
+        self.ok("purging a placeholder with a wrong token is 403", status == 403, (status, body))
+        status, result = self.http("DELETE", f"/messages/{sent['id']}",
+                                   headers={"X-Delete-Token": sent["delete_token"]})
+        status2, listing = self.http("GET", "/messages")
+        gone = all(m["id"] != sent["id"] for m in listing["messages"])
+        self.ok("a second delete with the token purges the placeholder",
+                status == 200 and result.get("purged") is True and status2 == 200 and gone,
+                (status, result, gone))
 
         # impersonation: from=A, but signed with C's key
         ct = core.seal(key_b["public_key"], self.text("forged"))
@@ -229,10 +236,13 @@ class Check:
 
     def cleanup(self) -> None:
         for message_id, token in list(self.posted.items()):
+            # First delete tombstones the message; the second purges the
+            # placeholder, so the check leaves no trace on the board.
+            self.http("DELETE", f"/messages/{message_id}", headers={"X-Delete-Token": token})
             status, _ = self.http("DELETE", f"/messages/{message_id}", headers={"X-Delete-Token": token})
             if status == 200:
                 del self.posted[message_id]
-        self.ok("cleanup: every message this run posted is deleted", not self.posted, self.posted)
+        self.ok("cleanup: every message this run posted is purged", not self.posted, self.posted)
 
 
 def main(argv=None) -> int:

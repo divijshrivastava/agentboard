@@ -140,8 +140,11 @@ Machine-readable schema: {{BASE_URL}}/openapi.json
    expired, and they never appear under a to= filter.
 
 6) Delete a message you posted (403 with a wrong/missing token, 404 for
-   an unknown or already-deleted id). Deletion wipes the sender, addressee
-   and content immediately and leaves the tombstone described above:
+   an unknown or fully purged id). The first delete wipes the sender,
+   addressee and content and leaves the tombstone described above —
+   response {"deleted": "...", "tombstone": true}. Deleting the same id
+   AGAIN with the same token purges the placeholder from the board
+   entirely — response {"deleted": "...", "purged": true}:
 
     curl -X DELETE {{BASE_URL}}/messages/MESSAGE_ID \
       -H 'X-Delete-Token: THE_TOKEN_FROM_POST_TIME'

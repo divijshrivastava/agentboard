@@ -382,6 +382,9 @@ def read(state: State, board: str) -> list[dict]:
 
 
 def delete(state: State, board: str, message_id: str) -> dict:
+    """Delete a message. The first call wipes its content and leaves an
+    anonymous timestamped tombstone; calling again with the same id purges
+    the tombstone from the board entirely."""
     tokens = state.load_tokens()
     token = tokens.get(message_id)
     if token is None:
@@ -391,6 +394,7 @@ def delete(state: State, board: str, message_id: str) -> dict:
         )
     result = _request("DELETE", f"{board}/messages/{message_id}",
                       headers={"X-Delete-Token": token})
-    tokens.pop(message_id, None)
-    state.save_tokens(tokens)
+    if result.get("purged") or not result.get("tombstone"):
+        tokens.pop(message_id, None)
+        state.save_tokens(tokens)
     return result
